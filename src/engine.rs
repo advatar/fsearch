@@ -146,7 +146,7 @@ impl Engine {
     /// Start indexing in the background and return at once; searches answer
     /// `Err` until the index is loaded (or, on the very first run, built).
     pub fn start(opts: Options) -> Result<Engine, String> {
-        std::fs::create_dir_all(&opts.dir).map_err(|e| e.to_string())?;
+        private_dir(&opts.dir).map_err(|e| e.to_string())?;
         // One writer per index: a second one would race index writes. The
         // lock dies with the process.
         let lock = std::fs::File::create(opts.dir.join("daemon.lock")).map_err(|e| e.to_string())?;
@@ -651,7 +651,31 @@ fn apply_loop(shared: &Arc<Shared>, rx: Receiver<Vec<fsevents::Event>>) {
     }
 }
 
+/// Create `dir` readable by this user only: the index lists every file on
+/// disk (consent-gated ones too, with Full Disk Access) and what's in them.
+pub fn private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
 /// Default data dir: `~/Library/Application Support/FSearch`.
 pub fn default_dir(home: &str) -> PathBuf {
     Path::new(home).join("Library/Application Support/FSearch")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn private_dir_is_owner_only() {
+        let d = std::env::temp_dir().join(format!("fsearch-test-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        private_dir(&d).unwrap();
+        assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 }

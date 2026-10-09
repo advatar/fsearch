@@ -69,7 +69,7 @@ fn home() -> String {
 
 fn data_dir() -> PathBuf {
     let d = PathBuf::from(home()).join("Library/Application Support/FSearch");
-    std::fs::create_dir_all(&d).ok();
+    fsearch::private_dir(&d).ok();
     d
 }
 
@@ -114,13 +114,34 @@ fn print_one(req: &serde_json::Value, raw: bool) {
     }
     let mut out = std::io::stdout().lock();
     for h in v["hits"].as_array().into_iter().flatten() {
-        let _ = writeln!(out, "{}", h["path"].as_str().unwrap_or(""));
+        let _ = writeln!(out, "{}", printable(h["path"].as_str().unwrap_or("")));
     }
     for f in v["files"].as_array().into_iter().flatten() {
         for m in f["matches"].as_array().into_iter().flatten() {
-            let _ = writeln!(out, "{}:{}: {}", f["path"].as_str().unwrap_or(""), m["line"], m["text"].as_str().unwrap_or("").trim());
+            let _ = writeln!(
+                out,
+                "{}:{}: {}",
+                printable(f["path"].as_str().unwrap_or("")),
+                m["line"],
+                printable(m["text"].as_str().unwrap_or("").trim())
+            );
         }
     }
+}
+
+/// File names and contents with control characters shown as '?': a file
+/// named or containing escape sequences can't drive the terminal.
+fn printable(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.chars().any(|c| c.is_control() && c != '\t') {
+        s.chars().map(|c| if c.is_control() && c != '\t' { '?' } else { c }).collect::<String>().into()
+    } else {
+        s.into()
+    }
+}
+
+/// Escape for a plist <string>.
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 fn stdio() {
@@ -203,9 +224,9 @@ fn install(login: bool) {
 </dict>
 </plist>
 "#,
-        bin.display(),
-        log.display(),
-        log.display()
+        xml(&bin.to_string_lossy()),
+        xml(&log.to_string_lossy()),
+        xml(&log.to_string_lossy())
     );
     std::fs::write(plist_path(), plist).unwrap();
     let target = format!("{}/{LABEL}", domain());
@@ -232,4 +253,21 @@ fn uninstall() {
 fn die(msg: &str) -> ! {
     eprintln!("fsearch: {msg}");
     std::process::exit(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn printable_hides_terminal_escapes() {
+        assert_eq!(printable("a\x1b]0;pwned\x07b\r"), "a?]0;pwned?b?");
+        assert_eq!(printable("plain\tname.rs"), "plain\tname.rs");
+        assert!(matches!(printable("main.rs"), std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn xml_escapes_plist_strings() {
+        assert_eq!(xml("/Users/a&b/<x>"), "/Users/a&amp;b/&lt;x&gt;");
+    }
 }

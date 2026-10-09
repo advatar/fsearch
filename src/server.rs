@@ -16,7 +16,7 @@ pub fn socket_path(dir: &Path) -> PathBuf {
 pub fn serve(dir: PathBuf, home: String) {
     // One daemon per socket. (The engine's own lock decides who writes the
     // index: an app embedding fsearch may own it while the daemon follows.)
-    std::fs::create_dir_all(&dir).ok();
+    fsearch::private_dir(&dir).ok();
     let Ok(lock) = std::fs::File::create(dir.join("socket.lock")) else { return };
     if unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         eprintln!("{} another fsearch daemon is running", fsearch::query::now_secs());
@@ -32,6 +32,9 @@ pub fn serve(dir: PathBuf, home: String) {
     let sock = socket_path(&dir);
     let _ = std::fs::remove_file(&sock);
     let listener = UnixListener::bind(&sock).expect("bind socket");
+    // The socket answers with any file's name and contents: this user only.
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600)).expect("chmod socket");
     for conn in listener.incoming().flatten() {
         let e = engine.clone();
         std::thread::spawn(move || handle(conn, &e));
