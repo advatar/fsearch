@@ -204,6 +204,9 @@ impl Segment {
         let f = std::fs::File::open(seg_path(dir, id)).ok()?;
         let map = unsafe { Mmap::map(&f) }.ok()?;
         let [ndocs, ntri, plen, paths_len] = fields(&map, MAGIC)?.map(|v| v as usize);
+        if !crate::index::counts_fit(&[ndocs, ntri, plen, paths_len], map.len()) {
+            return None;
+        }
         let (off, total) = layout(&lens(ndocs, ntri, plen, paths_len));
         if map.len() < total {
             return None;

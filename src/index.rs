@@ -353,6 +353,9 @@ impl Index {
 
     fn from_map(map: Mmap) -> Option<Index> {
         let [n, d, u, names_len, event_id, synced_at] = fields(&map, MAGIC)?.map(|v| v as usize);
+        if !counts_fit(&[n, d, u, names_len], map.len()) {
+            return None;
+        }
         let (off, total) = layout(&section_lens(n, d, u, names_len));
         if map.len() < total {
             return None;
@@ -429,6 +432,13 @@ pub(crate) fn header(magic: &[u8; 8], fields: &[u64]) -> Vec<u8> {
 /// The header's fields, if `b` starts with `magic`.
 pub(crate) fn fields<const N: usize>(b: &[u8], magic: &[u8; 8]) -> Option<[u64; N]> {
     (b.len() >= 8 + N * 8 && &b[..8] == magic).then(|| std::array::from_fn(|k| u64::from_le_bytes(b[8 + k * 8..16 + k * 8].try_into().unwrap())))
+}
+
+/// A header's counts can't exceed the file's size in bytes, so a corrupt or
+/// truncated file can't overflow the section math (and then map sections
+/// past the end of the file).
+pub(crate) fn counts_fit(counts: &[usize], file_len: usize) -> bool {
+    counts.iter().all(|&c| c <= file_len)
 }
 
 /// Section offsets for these lengths, and the file size.
@@ -558,5 +568,23 @@ fn prior_adjust(name: &[u8], depth: u8) -> i32 {
         b"folders" | b"Containers" | b"Group Containers" => -10,
         b"Application Support" => -5,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn huge_header_counts_are_rejected() {
+        assert!(counts_fit(&[0, 10, 100], 100));
+        assert!(!counts_fit(&[1 << 62, 0], 4096));
+    }
+
+    #[test]
+    fn corrupt_header_does_not_load() {
+        let mut m = memmap2::MmapMut::map_anon(4096).unwrap();
+        m[..HDR].copy_from_slice(&header(MAGIC, &[1 << 62, 1, 1, 1, 0, 0]));
+        assert!(Index::from_map(m.make_read_only().unwrap()).is_none());
     }
 }

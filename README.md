@@ -61,6 +61,18 @@ login item (`fsearch install --login`), give `~/.local/bin/fsearch` its own
 grant in System Settings > Privacy & Security, again after each rebuild.
 Without access it skips the protected folders instead of popping a prompt.
 
+## Security
+
+- Local only: no network access. The index and socket live in
+  `~/Library/Application Support/FSearch`, readable by you alone (0700 dir,
+  0600 socket).
+- With Full Disk Access, the daemon lists and reads files in protected
+  folders (Mail, Messages, Safari, Documents) for any program running as
+  you, including ones you never granted that access to. If that matters,
+  don't grant it: without it, macOS keeps those folders out of the index.
+- It never follows symlinks, opens FIFOs or downloads iCloud placeholders,
+  and the CLI shows control characters in names and lines as `?`.
+
 ## API
 
 JSON lines over `~/Library/Application Support/FSearch/fsearch.sock`, or
